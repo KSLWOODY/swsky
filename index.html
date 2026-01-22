@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>서쪽하늘로 술이 진다 · </title>
+  <title>서쪽하늘로 술이 진다 · 우리방 조회</title>
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
   <style>
     :root { --card:#131826; --muted:#aab3c2; --line:#222a3d; --txt:#f1f4fb; --glass:rgba(13,16,24,.72);}
@@ -78,7 +78,7 @@
 
     <div class="panel">
       <div class="row">
-        <input id="q" placeholder="검색: 닉네임/지역/MBTI/관심사/특징 등" />
+        <input id="q" placeholder="검색: 닉넴/사는곳/MBTI/취미/특징/직장 등" />
         <select id="region">
           <option value="">지역(전체)</option>
           <option value="서울">서울</option>
@@ -111,28 +111,24 @@
 
       <div class="footer">
         • 기본 데이터는 <code>data.csv</code>에서 읽습니다. <br/>
-        • 관리자 업로드에서 생성한 링크(#data=...)로도 공유할 수 있어요.
+        • 관리자 업로드에서 생성한 링크(<code>#data=...</code>)로도 공유할 수 있어요.
       </div>
     </div>
   </div>
 
 <script>
-  // 표준 키 (영문)로 맞춘 후 렌더링
-  const REQUIRED = ["nickname","birth","city","gender"];
+  // ✅ 실제 CSV 한글 컬럼명 기준
+  const REQUIRED = ["닉넴","생년","사는곳","성별"];
   const state = { rows: [], filtered: [] };
 
   function norm(s){ return (s ?? "").toString().trim(); }
   function includes(a,b){ return a.toLowerCase().includes(b.toLowerCase()); }
 
+  // --- UTF-8 safe base64 (for #data=...)
   function decodeB64Utf8(b64){
     const bin = atob(b64);
     const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
     return new TextDecoder("utf-8").decode(bytes);
-  }
-  function encodeB64Utf8(str){
-    const bytes = new TextEncoder().encode(str);
-    let bin=""; bytes.forEach(b=>bin+=String.fromCharCode(b));
-    return btoa(bin);
   }
 
   function readHashData(){
@@ -164,6 +160,16 @@
     return REQUIRED.every(k => keys.includes(k));
   }
 
+  // 생년이 89/91 처럼 2자리일 수도, 1991처럼 4자리일 수도 있어서 안전 처리
+  function toYear(val){
+    const s = norm(val);
+    const n = parseInt(s, 10);
+    if(Number.isNaN(n)) return null;
+    if(n >= 1000) return n;                 // 4자리(1989/1991)
+    if(n >= 0 && n <= 24) return 2000 + n;  // 00~24 -> 2000년대(필요시)
+    return 1900 + n;                        // 25~99 -> 1900년대
+  }
+
   async function loadData(){
     const hashRows = readHashData();
     if(hashRows){
@@ -174,8 +180,9 @@
     }
 
     try{
+      // ✅ GitHub Pages 대응: 반드시 상대경로 사용
       const r = await fetch("./data.csv", { cache: "no-store" });
-      if(!r.ok) throw new Error("sdata0122.xlsx not found");
+      if(!r.ok) throw new Error("data.csv not found");
       const text = await r.text();
       const rows = await parseCSVText(text);
       document.getElementById("datasrc").textContent = "data.csv";
@@ -189,14 +196,17 @@
   }
 
   function hydrate(){
-    // MBTI 옵션
+    // MBTI 옵션 구성
     const mbtiSet = new Set();
-    state.rows.forEach(r => { const m = norm(r.mbti); if(m) mbtiSet.add(m.toUpperCase()); });
+    state.rows.forEach(r => {
+      const m = norm(r["MBTI"]);
+      if(m) mbtiSet.add(m.toUpperCase());
+    });
     const mbtiSel = document.getElementById("mbti");
     mbtiSel.innerHTML = `<option value="">MBTI(전체)</option>` + [...mbtiSet].sort().map(m=>`<option value="${m}">${m}</option>`).join("");
 
     if(state.rows.length && !validateColumns(state.rows)){
-      alert("데이터 컬럼이 맞지 않습니다. (필수: nickname,birth,city,gender)");
+      alert("데이터 컬럼이 맞지 않습니다. (필수: 닉넴, 생년, 사는곳, 성별)");
     }
 
     // URL query로 필터 유지
@@ -210,9 +220,9 @@
     apply();
   }
 
-  function passesAge(birth, ageRange){
-    const y = parseInt(birth,10);
-    if(Number.isNaN(y)) return true;
+  function passesAge(birthVal, ageRange){
+    const y = toYear(birthVal);
+    if(!y) return true;
     if(!ageRange) return true;
     const [a,b] = ageRange.split("-").map(v=>parseInt(v,10));
     return y>=a && y<=b;
@@ -227,18 +237,29 @@
 
     let rows = state.rows.slice();
 
-    if(region) rows = rows.filter(r => norm(r.city) === region);
-    if(gender) rows = rows.filter(r => norm(r.gender) === gender);
-    if(mbti) rows = rows.filter(r => norm(r.mbti).toUpperCase() === mbti);
+    // 지역은 "사는곳"에 서울/경기/인천 등이 포함되는지로 필터
+    if(region) rows = rows.filter(r => norm(r["사는곳"]).includes(region));
+    if(gender) rows = rows.filter(r => norm(r["성별"]) === gender);
+    if(mbti) rows = rows.filter(r => norm(r["MBTI"]).toUpperCase() === mbti);
+
     if(age){
-      const [a,b] = age.split("-");
-      rows = rows.filter(r => passesAge(norm(r.birth), `${a}-${b}`));
+      rows = rows.filter(r => passesAge(r["생년"], age));
     }
+
     if(q){
       rows = rows.filter(r => {
         const blob = [
-          r.nickname, r.birth, r.city, r.district, r.gender, r.mbti,
-          r.status, r.interests, r.want_meet, r.notes, r.work
+          r["닉넴"],
+          r["생년"],
+          r["사는곳"],
+          r["직장"],
+          r["성별"],
+          r["가입날짜"],
+          r["커플솔로"],
+          r["MBTI"],
+          r["선호안주/술"],
+          r["취미/관심사"],
+          r["특징"]
         ].map(norm).join(" ");
         return includes(blob, q);
       });
@@ -254,6 +275,7 @@
     if(gender) sp.set("gender", gender);
     if(mbti) sp.set("mbti", mbti);
     if(age) sp.set("age", age);
+
     const base = location.origin + location.pathname;
     history.replaceState(null, "", base + (sp.toString()?`?${sp}`:"") + location.hash);
   }
@@ -267,25 +289,27 @@
     }
 
     grid.innerHTML = rows.map(r=>{
-      const nick = norm(r.nickname) || "—";
-      const birth = norm(r.birth);
-      const city = norm(r.city);
-      const dist = norm(r.district);
-      const g = norm(r.gender);
-      const m = norm(r.mbti).toUpperCase();
-      const st = norm(r.status);
-      const it = norm(r.interests);
-      const wm = norm(r.want_meet);
-      const nt = norm(r.notes);
-      const wk = norm(r.work);
+      const nick = norm(r["닉넴"]) || "—";
+      const year = norm(r["생년"]);
+      const where = norm(r["사는곳"]);
+      const g = norm(r["성별"]);
+      const mbti = norm(r["MBTI"]).toUpperCase();
+      const status = norm(r["커플솔로"]);
+      const work = norm(r["직장"]);
+      const food = norm(r["선호안주/술"]);
+      const hobby = norm(r["취미/관심사"]);
+      const note = norm(r["특징"]);
+      const joined = norm(r["가입날짜"]);
 
-      const headRight = [birth, city, g].filter(Boolean).join(" · ");
-      const line1 = [dist, m, st].filter(Boolean).join(" / ");
+      const headRight = [year, where, g].filter(Boolean).join(" · ");
+      const line1 = [mbti, status].filter(Boolean).join(" / ");
+
       const lines = [];
-      if(wk) lines.push(`직장/모임: ${wk}`);
-      if(it) lines.push(`취미/관심사: ${it}`);
-      if(wm) lines.push(`선호 안주/술: ${wm}`);
-      if(nt) lines.push(`특징: ${nt}`);
+      if(work) lines.push(`직장: ${work}`);
+      if(food) lines.push(`선호 안주/술: ${food}`);
+      if(hobby) lines.push(`취미/관심사: ${hobby}`);
+      if(note) lines.push(`특징: ${note}`);
+      if(joined) lines.push(`가입: ${joined}`);
 
       return `
         <div class="card">
@@ -316,8 +340,6 @@
 
   document.getElementById("reset").addEventListener("click", ()=>{
     location.search = "";
-    // 해시 데이터는 유지해도 되지만, 완전 초기화 원하면 아래 줄 주석 해제
-    // location.hash = "";
     document.getElementById("q").value="";
     document.getElementById("region").value="";
     document.getElementById("gender").value="";
@@ -331,7 +353,14 @@
       await navigator.clipboard.writeText(location.href);
       alert("현재 화면 링크를 복사했습니다!");
     }catch(e){
-      alert("복사 실패: 브라우저 권한을 확인해주세요.");
+      // fallback
+      const tmp = document.createElement("textarea");
+      tmp.value = location.href;
+      document.body.appendChild(tmp);
+      tmp.select();
+      document.execCommand("copy");
+      tmp.remove();
+      alert("현재 화면 링크를 복사했습니다!");
     }
   });
 
