@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>서쪽하늘로 술이 진다 · 우리방</title>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <style>
+    :root { --card:#131826; --muted:#aab3c2; --line:#222a3d; --txt:#f1f4fb; --glass:rgba(13,16,24,.72);}
+    body{
+      margin:0;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,'Noto Sans KR',sans-serif;
+      color:var(--txt);
+      background:
+        linear-gradient(180deg, rgba(0,0,0,.55), rgba(10,12,18,.88)),
+        url('./bg.png') center/cover fixed no-repeat;
+      min-height:100vh;
+    }
+    .wrap{max-width:1040px;margin:0 auto;padding:22px}
+    .brand{
+      display:flex; align-items:flex-end; justify-content:space-between; gap:14px; flex-wrap:wrap;
+      background:var(--glass); border:1px solid rgba(255,255,255,.08);
+      border-radius:18px; padding:16px 16px;
+      backdrop-filter: blur(10px);
+    }
+    h1{margin:0;font-size:20px;letter-spacing:-.2px}
+    .sub{color:var(--muted);font-size:13px;margin-top:6px;line-height:1.45}
+    .links{display:flex;gap:10px;flex-wrap:wrap}
+    .btn{cursor:pointer;background:rgba(26,35,56,.9);border:1px solid rgba(255,255,255,.10);
+      border-radius:12px;padding:10px 12px;color:var(--txt);font-size:13px;text-decoration:none}
+    .btn:hover{filter:brightness(1.06)}
+    .panel{
+      margin-top:14px;
+      background:var(--glass);
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:18px;
+      padding:14px;
+      backdrop-filter: blur(10px);
+    }
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+    input,select{
+      background:rgba(12,16,28,.92);
+      color:var(--txt);
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:12px;padding:10px 12px;font-size:14px
+    }
+    input{flex:1;min-width:240px}
+    select{min-width:150px}
+    .small{min-width:120px}
+    .meta{display:flex;gap:10px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin-top:10px}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px}
+    @media (max-width:820px){.grid{grid-template-columns:1fr}}
+    .card{
+      background:rgba(12,16,28,.86);
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:16px;padding:14px
+    }
+    .name{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+    .title{font-weight:800}
+    .pill{font-size:12px;color:#d7e7ff;background:rgba(26,43,74,.9);border:1px solid rgba(255,255,255,.12);padding:4px 8px;border-radius:999px;white-space:nowrap}
+    .desc{margin-top:10px;color:var(--muted);font-size:13px;line-height:1.55}
+    .footer{margin-top:12px;color:var(--muted);font-size:12px;line-height:1.45}
+    code{background:rgba(12,16,28,.92);border:1px solid rgba(255,255,255,.10);padding:2px 6px;border-radius:8px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">
+      <div>
+        <h1>서쪽하늘로 술이 진다 🌇</h1>
+        <div class="sub">우리방 멤버 정보 조회 페이지 · 검색/필터로 빠르게 찾아보세요 🍶</div>
+      </div>
+      <div class="links">
+        <a class="btn" href="./admin.html">관리자 업로드</a>
+        <a class="btn" href="javascript:void(0)" id="copyLink">현재 화면 링크 복사</a>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="row">
+        <input id="q" placeholder="검색: 닉네임/지역/MBTI/관심사/특징 등" />
+        <select id="region">
+          <option value="">지역(전체)</option>
+          <option value="서울">서울</option>
+          <option value="경기">경기</option>
+          <option value="인천">인천</option>
+        </select>
+        <select id="gender" class="small">
+          <option value="">성별(전체)</option>
+          <option value="남">남</option>
+          <option value="여">여</option>
+        </select>
+        <select id="mbti" class="small">
+          <option value="">MBTI(전체)</option>
+        </select>
+        <select id="age" class="small">
+          <option value="">출생(전체)</option>
+          <option value="1985-1990">1985~1990</option>
+          <option value="1991-1994">1991~1994</option>
+          <option value="1995-1997">1995~1997</option>
+        </select>
+        <button class="btn" id="reset">초기화</button>
+      </div>
+
+      <div class="meta">
+        <div>데이터: <span id="datasrc">로딩중…</span></div>
+        <div>표시: <span id="count">0</span>명</div>
+      </div>
+
+      <div class="grid" id="grid"></div>
+
+      <div class="footer">
+        • 기본 데이터는 <code>data.csv</code>에서 읽습니다. <br/>
+        • 관리자 업로드에서 생성한 링크(#data=...)로도 공유할 수 있어요.
+      </div>
+    </div>
+  </div>
+
+<script>
+  // 표준 키 (영문)로 맞춘 후 렌더링
+  const REQUIRED = ["nickname","birth","city","gender"];
+  const state = { rows: [], filtered: [] };
+
+  function norm(s){ return (s ?? "").toString().trim(); }
+  function includes(a,b){ return a.toLowerCase().includes(b.toLowerCase()); }
+
+  function decodeB64Utf8(b64){
+    const bin = atob(b64);
+    const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+    return new TextDecoder("utf-8").decode(bytes);
+  }
+  function encodeB64Utf8(str){
+    const bytes = new TextEncoder().encode(str);
+    let bin=""; bytes.forEach(b=>bin+=String.fromCharCode(b));
+    return btoa(bin);
+  }
+
+  function readHashData(){
+    const hash = location.hash || "";
+    const m = hash.match(/data=([^&]+)/);
+    if(!m) return null;
+    try{
+      const b64 = decodeURIComponent(m[1]);
+      const json = decodeB64Utf8(b64);
+      const data = JSON.parse(json);
+      return Array.isArray(data) ? data : null;
+    }catch(e){ return null; }
+  }
+
+  function parseCSVText(text){
+    return new Promise((resolve,reject)=>{
+      Papa.parse(text, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (res)=> resolve(res.data),
+        error: reject
+      });
+    });
+  }
+
+  function validateColumns(rows){
+    if(!rows.length) return true;
+    const keys = Object.keys(rows[0]).map(k=>k.trim());
+    return REQUIRED.every(k => keys.includes(k));
+  }
+
+  async function loadData(){
+    const hashRows = readHashData();
+    if(hashRows){
+      document.getElementById("datasrc").textContent = "공유 링크(업로드 데이터)";
+      state.rows = hashRows;
+      hydrate();
+      return;
+    }
+
+    try{
+      const r = await fetch("./data.csv", { cache: "no-store" });
+      if(!r.ok) throw new Error("data.csv not found");
+      const text = await r.text();
+      const rows = await parseCSVText(text);
+      document.getElementById("datasrc").textContent = "data.csv";
+      state.rows = rows;
+      hydrate();
+    }catch(e){
+      document.getElementById("datasrc").textContent = "데이터 없음 (admin에서 링크 생성 가능)";
+      state.rows = [];
+      hydrate();
+    }
+  }
+
+  function hydrate(){
+    // MBTI 옵션
+    const mbtiSet = new Set();
+    state.rows.forEach(r => { const m = norm(r.mbti); if(m) mbtiSet.add(m.toUpperCase()); });
+    const mbtiSel = document.getElementById("mbti");
+    mbtiSel.innerHTML = `<option value="">MBTI(전체)</option>` + [...mbtiSet].sort().map(m=>`<option value="${m}">${m}</option>`).join("");
+
+    if(state.rows.length && !validateColumns(state.rows)){
+      alert("데이터 컬럼이 맞지 않습니다. (필수: nickname,birth,city,gender)");
+    }
+
+    // URL query로 필터 유지
+    const p = new URLSearchParams(location.search);
+    if(p.get("q")) document.getElementById("q").value = p.get("q");
+    if(p.get("region")) document.getElementById("region").value = p.get("region");
+    if(p.get("gender")) document.getElementById("gender").value = p.get("gender");
+    if(p.get("mbti")) document.getElementById("mbti").value = p.get("mbti");
+    if(p.get("age")) document.getElementById("age").value = p.get("age");
+
+    apply();
+  }
+
+  function passesAge(birth, ageRange){
+    const y = parseInt(birth,10);
+    if(Number.isNaN(y)) return true;
+    if(!ageRange) return true;
+    const [a,b] = ageRange.split("-").map(v=>parseInt(v,10));
+    return y>=a && y<=b;
+  }
+
+  function apply(){
+    const q = norm(document.getElementById("q").value);
+    const region = norm(document.getElementById("region").value);
+    const gender = norm(document.getElementById("gender").value);
+    const mbti = norm(document.getElementById("mbti").value).toUpperCase();
+    const age = norm(document.getElementById("age").value);
+
+    let rows = state.rows.slice();
+
+    if(region) rows = rows.filter(r => norm(r.city) === region);
+    if(gender) rows = rows.filter(r => norm(r.gender) === gender);
+    if(mbti) rows = rows.filter(r => norm(r.mbti).toUpperCase() === mbti);
+    if(age){
+      const [a,b] = age.split("-");
+      rows = rows.filter(r => passesAge(norm(r.birth), `${a}-${b}`));
+    }
+    if(q){
+      rows = rows.filter(r => {
+        const blob = [
+          r.nickname, r.birth, r.city, r.district, r.gender, r.mbti,
+          r.status, r.interests, r.want_meet, r.notes, r.work
+        ].map(norm).join(" ");
+        return includes(blob, q);
+      });
+    }
+
+    state.filtered = rows;
+    render(rows);
+
+    // 공유용: 필터를 URL에 기록(해시 데이터는 유지)
+    const sp = new URLSearchParams();
+    if(q) sp.set("q", q);
+    if(region) sp.set("region", region);
+    if(gender) sp.set("gender", gender);
+    if(mbti) sp.set("mbti", mbti);
+    if(age) sp.set("age", age);
+    const base = location.origin + location.pathname;
+    history.replaceState(null, "", base + (sp.toString()?`?${sp}`:"") + location.hash);
+  }
+
+  function render(rows){
+    document.getElementById("count").textContent = rows.length.toString();
+    const grid = document.getElementById("grid");
+    if(!rows.length){
+      grid.innerHTML = `<div class="card">표시할 데이터가 없습니다. (admin에서 업로드 링크 생성 가능)</div>`;
+      return;
+    }
+
+    grid.innerHTML = rows.map(r=>{
+      const nick = norm(r.nickname) || "—";
+      const birth = norm(r.birth);
+      const city = norm(r.city);
+      const dist = norm(r.district);
+      const g = norm(r.gender);
+      const m = norm(r.mbti).toUpperCase();
+      const st = norm(r.status);
+      const it = norm(r.interests);
+      const wm = norm(r.want_meet);
+      const nt = norm(r.notes);
+      const wk = norm(r.work);
+
+      const headRight = [birth, city, g].filter(Boolean).join(" · ");
+      const line1 = [dist, m, st].filter(Boolean).join(" / ");
+      const lines = [];
+      if(wk) lines.push(`직장/모임: ${wk}`);
+      if(it) lines.push(`취미/관심사: ${it}`);
+      if(wm) lines.push(`선호 안주/술: ${wm}`);
+      if(nt) lines.push(`특징: ${nt}`);
+
+      return `
+        <div class="card">
+          <div class="name">
+            <div class="title">${escapeHtml(nick)}</div>
+            <div class="pill">${escapeHtml(headRight || " ")}</div>
+          </div>
+          <div class="desc">
+            ${line1 ? escapeHtml(line1) : ""}
+            ${lines.length ? `<div style="margin-top:8px">${lines.map(l=>escapeHtml(l)).join("<br/>")}</div>` : ""}
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  function escapeHtml(s){
+    return (s ?? "").toString()
+      .replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;").replaceAll("'","&#39;");
+  }
+
+  // 이벤트
+  ["q","region","gender","mbti","age"].forEach(id=>{
+    document.getElementById(id).addEventListener("input", apply);
+    document.getElementById(id).addEventListener("change", apply);
+  });
+
+  document.getElementById("reset").addEventListener("click", ()=>{
+    location.search = "";
+    // 해시 데이터는 유지해도 되지만, 완전 초기화 원하면 아래 줄 주석 해제
+    // location.hash = "";
+    document.getElementById("q").value="";
+    document.getElementById("region").value="";
+    document.getElementById("gender").value="";
+    document.getElementById("mbti").value="";
+    document.getElementById("age").value="";
+    apply();
+  });
+
+  document.getElementById("copyLink").addEventListener("click", async ()=>{
+    try{
+      await navigator.clipboard.writeText(location.href);
+      alert("현재 화면 링크를 복사했습니다!");
+    }catch(e){
+      alert("복사 실패: 브라우저 권한을 확인해주세요.");
+    }
+  });
+
+  loadData();
+</script>
+</body>
+</html>

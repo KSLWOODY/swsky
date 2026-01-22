@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>관리자 업로드 · 우리방</title>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    :root { --muted:#aab3c2; --txt:#f1f4fb; --glass:rgba(13,16,24,.72);}
+    body{
+      margin:0;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,'Noto Sans KR',sans-serif;
+      color:var(--txt);
+      background:
+        linear-gradient(180deg, rgba(0,0,0,.55), rgba(10,12,18,.88)),
+        url('./bg.png') center/cover fixed no-repeat;
+      min-height:100vh;
+    }
+    .wrap{max-width:980px;margin:0 auto;padding:22px}
+    .brand{
+      background:var(--glass); border:1px solid rgba(255,255,255,.08);
+      border-radius:18px; padding:16px; backdrop-filter: blur(10px);
+    }
+    h1{margin:0;font-size:18px}
+    .sub{color:var(--muted);font-size:13px;margin-top:6px;line-height:1.5}
+    .panel{margin-top:14px;background:var(--glass);border:1px solid rgba(255,255,255,.08);border-radius:18px;padding:14px;backdrop-filter: blur(10px);}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    input[type="file"]{background:rgba(12,16,28,.92);color:var(--txt);border:1px solid rgba(255,255,255,.10);border-radius:12px;padding:10px}
+    .btn{cursor:pointer;background:rgba(26,35,56,.9);border:1px solid rgba(255,255,255,.10);border-radius:12px;padding:10px 12px;color:var(--txt);font-size:14px;text-decoration:none}
+    .btn:hover{filter:brightness(1.06)}
+    textarea{width:100%;min-height:120px;background:rgba(12,16,28,.92);color:var(--txt);border:1px solid rgba(255,255,255,.10);border-radius:12px;padding:12px;font-size:12px}
+    .hint{color:var(--muted);font-size:12px;margin-top:10px;line-height:1.55}
+    code{background:rgba(12,16,28,.92);border:1px solid rgba(255,255,255,.10);padding:2px 6px;border-radius:8px}
+    .ok{color:#b7ffcc}
+    .bad{color:#ffb7b7}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">
+      <h1>관리자 업로드</h1>
+      <div class="sub">
+        엑셀(<b>.xlsx</b>) 또는 CSV(<b>.csv</b>)를 업로드하면 <b>공유 링크</b>를 생성합니다.<br/>
+        생성된 링크를 열면 <code>index.html</code>에서 업로드 데이터가 그대로 표시됩니다. (서버 저장 없음)
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="row">
+        <input id="file" type="file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+        <button class="btn" id="make">공유 링크 만들기</button>
+        <button class="btn" id="tpl">CSV 템플릿 다운로드</button>
+        <a class="btn" href="./index.html">조회 페이지로</a>
+      </div>
+
+      <div class="hint">
+        ✅ 필수 컬럼(영문 기준): <code>nickname</code>, <code>birth</code>, <code>city</code>, <code>gender</code><br/>
+        ✅ 엑셀(한글 헤더)도 자동 인식합니다: 닉넴/생년/사는곳/성별/MBTI/커플솔로/취미/선호안주/특징/직장 등<br/>
+        <span id="status"></span>
+      </div>
+
+      <div class="hint" style="margin-top:14px;">🔗 생성된 공유 링크</div>
+      <textarea id="out" readonly placeholder="여기에 링크가 생성됩니다"></textarea>
+      <div class="row" style="margin-top:10px;">
+        <button class="btn" id="copy">링크 복사</button>
+        <button class="btn" id="open">링크 열기</button>
+      </div>
+
+      <div class="hint" style="margin-top:14px;">
+        💡 “정식 데이터로 영구 반영”하려면 GitHub에서 <code>data.csv</code> 파일을 교체해 주세요.<br/>
+        (repo → Add file → Upload files → data.csv 덮어쓰기)
+      </div>
+    </div>
+  </div>
+
+<script>
+  const REQUIRED = ["nickname","birth","city","gender"];
+
+  function norm(s){ return (s ?? "").toString().trim(); }
+
+  // UTF-8 safe base64
+  function encodeB64Utf8(str){
+    const bytes = new TextEncoder().encode(str);
+    let bin=""; bytes.forEach(b=>bin+=String.fromCharCode(b));
+    return btoa(bin);
+  }
+
+  function parseCSV(file){
+    return new Promise((resolve,reject)=>{
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (res)=> resolve(res.data),
+        error: reject
+      });
+    });
+  }
+
+  function parseXLSX(file){
+    return new Promise((resolve,reject)=>{
+      const reader = new FileReader();
+      reader.onload = (e)=>{
+        try{
+          const data = new Uint8Array(e.target.result);
+          const wb = XLSX.read(data, {type:"array"});
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const json = XLSX.utils.sheet_to_json(ws, {defval:""});
+          resolve(json);
+        }catch(err){ reject(err); }
+      };
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  function toFullYear(v){
+    const s = norm(v);
+    if(!s) return "";
+    const n = parseInt(s,10);
+    if(Number.isNaN(n)) return s;
+    if(n < 100){
+      // 기본: 85~97은 1900s로, 그 외는 2000s로
+      return String(n >= 50 ? 1900 + n : 2000 + n);
+    }
+    return String(n);
+  }
+
+  function inferRegion(place){
+    const p = norm(place);
+    if(!p) return "";
+    if(p.includes("인천")) return "인천";
+    const incheon = ["중구","동구","미추홀","연수","남동","부평","계양","서구","강화","옹진"];
+    const gg = ["부천","안양","시흥","광명","김포","고양","파주","의정부","성남","수원","용인","안산","과천","하남","남양주","양주","동두천","포천","구리","군포","의왕","화성","평택","이천","여주","오산","양평","가평","연천"];
+    const seoul = ["종로","중구","용산","성동","광진","동대문","중랑","성북","강북","도봉","노원","은평","서대문","마포","양천","강서","구로","금천","영등포","동작","관악","서초","강남","송파","강동"];
+    const p2 = p.replace(/(시|구)$/,"");
+    if(incheon.includes(p2)) return "인천";
+    if(gg.includes(p2)) return "경기";
+    if(seoul.includes(p2)) return "서울";
+    return "서울";
+  }
+
+  function inferDistrict(place, region){
+    const p = norm(place);
+    if(!p) return "";
+    const seoul = ["종로","중구","용산","성동","광진","동대문","중랑","성북","강북","도봉","노원","은평","서대문","마포","양천","강서","구로","금천","영등포","동작","관악","서초","강남","송파","강동"];
+    if(region === "서울"){
+      const p2 = p.replace(/구$/,"");
+      if(seoul.includes(p2)) return p2 + "구";
+    }
+    return "";
+  }
+
+  function mapRow(r){
+    // 한글 헤더 → 표준 영문 키로 매핑
+    // 가능한 한 많이 흡수하도록 여러 후보를 둠
+    const nickname = norm(r.nickname || r.닉넴 || r.닉네임 || r.name || r.이름);
+    const birthRaw = r.birth || r.생년 || r.출생 || r.출생년도 || r.나이;
+    const place = norm(r.city || r.사는곳 || r.거주지 || r.지역 || r.동네);
+    const gender = norm(r.gender || r.성별);
+    const mbti = norm(r.mbti || r.MBTI).toUpperCase();
+    const status = norm(r.status || r.커플솔로 || r.커플 || r.솔로);
+    const interests = norm(r.interests || r["취미/관심사"] || r.취미 || r.관심사);
+    const want_meet = norm(r.want_meet || r["선호안주/술"] || r.선호안주 || r.선호술 || r.안주 || r.술);
+    const notes = norm(r.notes || r.특징 || r.메모);
+    const work = norm(r.work || r.직장 || r.회사 || r.소속);
+
+    const region = inferRegion(place);
+    const district = inferDistrict(place, region);
+
+    return {
+      nickname,
+      birth: toFullYear(birthRaw),
+      city: region,
+      district,
+      gender,
+      mbti,
+      status,
+      interests,
+      want_meet,
+      notes,
+      work
+    };
+  }
+
+  function validate(rows){
+    if(!rows.length) return {ok:false, msg:"데이터가 비어있습니다."};
+    const keys = Object.keys(rows[0]).map(k=>k.trim());
+    const missing = REQUIRED.filter(k=>!keys.includes(k));
+    if(missing.length) return {ok:false, msg:`필수 컬럼 누락: ${missing.join(", ")}`};
+    return {ok:true};
+  }
+
+  function makeLink(rows){
+    const json = JSON.stringify(rows);
+    const b64 = encodeB64Utf8(json);
+    const base = location.origin + location.pathname.replace(/admin\.html$/,"index.html");
+    return base + "#data=" + encodeURIComponent(b64);
+  }
+
+  function downloadTemplate(){
+    const header = ["nickname","birth","city","district","gender","mbti","status","interests","want_meet","notes","work"].join(",");
+    const sample = [
+      "새벽,1991,인천,부평구,여,ISTP,솔로,술/맛집/수다,서부권 한잔,방장,중구",
+      "모노,1989,서울,영등포구,남,ENFP,솔로,위스키/안주,퇴근후 번개,부방장,영등포"
+    ].join("\n");
+    const blob = new Blob([header + "\n" + sample], {type:"text/csv;charset=utf-8"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "ourbang_template.csv";
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function build(){
+    const f = document.getElementById("file").files[0];
+    if(!f){ alert("파일을 선택해주세요 (.xlsx 또는 .csv)"); return; }
+
+    let raw=[];
+    try{
+      if(f.name.toLowerCase().endsWith(".xlsx")){
+        raw = await parseXLSX(f);
+      }else{
+        raw = await parseCSV(f);
+      }
+    }catch(e){
+      alert("파일 읽기에 실패했습니다. (엑셀/CSV 형식을 확인해주세요)");
+      return;
+    }
+
+    const mapped = raw.map(mapRow).filter(r => norm(r.nickname));
+    const v = validate(mapped);
+    const st = document.getElementById("status");
+    if(!v.ok){
+      st.innerHTML = `<span class="bad">❌ ${v.msg}</span>`;
+      alert(v.msg);
+      return;
+    }
+    st.innerHTML = `<span class="ok">✅ ${mapped.length}명 변환 완료</span>`;
+
+    const link = makeLink(mapped);
+    document.getElementById("out").value = link;
+  }
+
+  document.getElementById("tpl").addEventListener("click", downloadTemplate);
+  document.getElementById("make").addEventListener("click", build);
+
+  document.getElementById("copy").addEventListener("click", async ()=>{
+    const t = document.getElementById("out").value.trim();
+    if(!t){ alert("먼저 공유 링크를 생성해주세요."); return; }
+    try{
+      await navigator.clipboard.writeText(t);
+      alert("링크를 복사했습니다!");
+    }catch(e){
+      const out = document.getElementById("out");
+      out.focus(); out.select();
+      document.execCommand("copy");
+      alert("링크를 복사했습니다!");
+    }
+  });
+
+  document.getElementById("open").addEventListener("click", ()=>{
+    const t = document.getElementById("out").value.trim();
+    if(!t){ alert("먼저 공유 링크를 생성해주세요."); return; }
+    window.open(t, "_blank");
+  });
+</script>
+</body>
+</html>
