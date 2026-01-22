@@ -110,7 +110,7 @@
       <div class="grid" id="grid"></div>
 
       <div class="footer">
-        • 기본 데이터는 <code>data.csv</code>에서 읽습니다. <br/>
+        • 기본 데이터는 <code>sdata0122.xlsx</code>에서 읽습니다. <br/>
         • 관리자 업로드에서 생성한 링크(#data=...)로도 공유할 수 있어요.
       </div>
     </div>
@@ -174,11 +174,11 @@
     }
 
     try{
-      const r = await fetch("./data.csv", { cache: "no-store" });
-      if(!r.ok) throw new Error("data.csv not found");
+      const r = await fetch("/sdata0122.xlsx", { cache: "no-store" });
+      if(!r.ok) throw new Error("sdata0122.xlsx not found");
       const text = await r.text();
       const rows = await parseCSVText(text);
-      document.getElementById("datasrc").textContent = "data.csv";
+      document.getElementById("datasrc").textContent = "sdata0122.xlsx";
       state.rows = rows;
       hydrate();
     }catch(e){
